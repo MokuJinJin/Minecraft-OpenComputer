@@ -2,16 +2,19 @@
 -- Receives messages from around the network and routes to destination
 -------------------------------------------------------------------------
 
--- Define routing table
-tRoute = 
-{
-  {dest="TS1", address="eb6551a1-1b03-4603-bdad-75126678eeb2", via="MODEM", desc="Terminal Server"},
-  {dest="PC3", address="feec0ad2-cbb3-4a40-9aa3-075a36ff6206", via="MODEM", desc="Tier 3 computer"}
-}
-
 -- Constants
 ciPort=1001 -- Port used globally on my network
-configFile="tRoute.cfg"
+-- Name of the File containing all dest
+configFile=".tRoute.cfg"
+-- Activate Debug Logging, can be modified by command while executing : 
+-- send LCL [LOG/NOLOG]
+local bLog = true
+
+-- Codename for admin command
+local codeName = ".NeT"
+
+-------------------------------------------------------------------------
+-- ***** Init *****
 
 -- Open modem and tunnel
 local oComponent = require("component")
@@ -29,8 +32,16 @@ if not oModem.isOpen(ciPort) then
   os.exit()
 end
 
+bContinue = true
+local lsDest = ""
+local lsMsg = ""
+
+-- Define routing table
+tRoute = {}
+readConfig()
+
 -------------------------------------------------------------------------
--- Functions
+-- ***** Functions *****
 
 function readConfig()
   local file = io.open(configFile)
@@ -72,7 +83,7 @@ end
 function FindDestByAddress(sAddress, ptRoute)
   for i, row in ipairs(ptRoute) do 
     if row.address == sAddress then
-      return row.dest
+      return FindDest(row.dest,ptRoute)
     end
   end
   return "UKW"
@@ -91,16 +102,24 @@ local loS = require("serialization")
   return lsDest, lsCmd
 end
 
+function executeServerCommand(commandName)
+	local fs = require("filesystem")
+	local filename = ".net/ServerCommand-"..string.lower(commandName)..".lua"
+	local cmd = loadfile(filename)
+	if f~= nil then
+		return f()
+	elseif f == nil then
+		local err = "Failed to load server command : "..filename
+		print(err)
+		return err;
+	else
+		local err = "Error loadfile : "..f
+		print(err)
+		return err;
+	end
+end
 -------------------------------------------------------------------------
--- Main Program
-
-local fContinue = true
-local fLog = true
-local lsDest = ""
-local lsMsg = ""
-
-writeConfig(tRoute)
-readConfig()
+-- ***** Main Program *****
 
 -- Clear the screen
 oTerm.clear()
@@ -109,40 +128,42 @@ print("Initialising message routing...")
 -- Enter Loop
 while fContinue do
   -- Wait for an inbound message
-print("Waiting for next message ...\r")
+print("Waiting for the next message ...\r")
 
   _, _, remoteAddress, _, _, sMsgRaw = oEvent.pull("modem_message")
-if fLog then print("msg received:" ..  sMsgRaw .. " from " .. remoteAddress) end
+if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remoteAddress) end
   -- Parse message
   lsDest, lsCmd = ParseMsg(sMsgRaw)
 
-  -- Check for debug/local command
-  if lsDest == "LCL" then
+  -- Check for server command
+  if lsDest == codeName then
     -- Check to log
-    if fLog then print("CMD " .. sMsgRaw) end
+    if bLog then print("CMD " .. sMsgRaw) end
     -- Check for program quit
-    if lsCmd == "EXIT" then fContinue = false end
-    if lsCmd == "LOG" then 
-      fLog = true 
-      print("CMD Enable Logging")
-    end
-    if lsCmd == "NOLOG" then 
-      fLog = false
-      print("CMD Disable Logging") 
-    end
+    executeServerCommand(lsCmd)
+	--if lsCmd == "EXIT" then bContinue = false end
+    --if lsCmd == "LOG" then 
+    --  bLog = true 
+    --  print("CMD Enable Logging")
+    --end
+    --if lsCmd == "NOLOG" then 
+    --  bLog = false
+    --  print("CMD Disable Logging") 
+    --end
     if lsCmd == "LIST" then
       lsCmd = oSerialization.serialize(tRoute)
       --lsDest = "CMD"
       lsDest = FindDestByAddress(remoteAddress,tRoute)
     end
   end
+  
   -- Message to process/send
-  if lsDest ~= "LCL" or (lsDest == "LCL" and lsCmd == "LIST") then
+  if lsDest ~= codeName or (lsDest == codeName and lsCmd == "LIST") then
     -- Get the destination etc
     lsAddress, lsVia, lsDesc = FindDest(lsDest, tRoute)
 
     -- Check to log
-    if fLog then print("Sending command " .. lsCmd .. " via " .. lsVia .. " to " .. lsDest .. ":" .. lsDesc) end
+    if bLog then print("Sending command " .. lsCmd .. " via " .. lsVia .. " to " .. lsDest .. ":" .. lsDesc) end
 
     -- Check for unknown destination
     if lsDesc == "Unknown Address" then

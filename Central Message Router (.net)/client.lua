@@ -37,7 +37,9 @@ local loSerialization = require("serialization")
 
   -- Convert the message back into a table
   local tList = loSerialization.unserialize(psMsg)
-
+  
+  if tList == nil then print(psMsg) os.exit() end
+  
   print("LIST OF VALID DESTINATIONS")
   for i, row in pairs(tList) do
     print("\t" .. row.dest .. "\t" .. row.desc)

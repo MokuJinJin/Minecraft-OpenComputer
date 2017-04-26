@@ -170,30 +170,35 @@ while bContinue do
   if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remote.address) end
   -- Parse message
   lsDest, lsCmd = ParseMsg(sMsgRaw)
-
-  -- Check for server command and remote is register (TODO : allowed)
-  if lsDest == codeName and remote.found then
-	if bLog then print("ServerCommand <" .. lsCmd .. "> from "..remote.desc) end
-    -- Execute ServerCommand
-    executeServerCommand(lsCmd)
-  else -- Not a server Command
-	-- Special Command LIST : reply to remoteAddress
-	if lsCmd == "LIST" or lsDest == "LIST" then
-		if bLog then print("Command LIST from : ".. remote.desc) end
-		sendMessage(remote,oSerialization.serialize(tRoute))
-	else
-		-- Get the destination etc
-		destination = FindByDest(lsDest)
-		if not destination.found then
-			if bLog then print("Unknown destination : ".. destination.dest) end
-			if bLog then print("Sending message to remote : ".. remote.desc) end
-			sendMessage(remote,"Destination <".. destination.dest .."> not found")
+  if remote.found then
+	  -- Check for server command and remote is register (TODO : allowed)
+	  if lsDest == codeName and remote.found then
+		if bLog then print("ServerCommand <" .. lsCmd .. "> from "..remote.desc) end
+		-- Execute ServerCommand
+		executeServerCommand(lsCmd)
+	  else -- Not a server Command
+		-- Special Command LIST : reply to remoteAddress
+		if lsCmd == "LIST" or lsDest == "LIST" then
+			if bLog then print("Command LIST from : ".. remote.desc) end
+			sendMessage(remote,oSerialization.serialize(tRoute))
 		else
-			if bLog then print("Sending message to destination : ".. destination.desc) end
-			sendMessage(destination,lsCmd)
+			-- Get the destination etc
+			destination = FindByDest(lsDest)
+			if not destination.found then
+				if bLog then print("Unknown destination : ".. destination.dest) end
+				if bLog then print("Sending message to remote : ".. remote.desc) end
+				sendMessage(remote,"Destination <".. destination.dest .."> not found")
+			else
+				if bLog then print("Sending message to destination : ".. destination.desc) end
+				sendMessage(destination,lsCmd)
+			end
 		end
+	  end
+	else
+		if bLog then print("Remote not found: " .. remote.address) end
+		remote.via = "MODEM"
+		sendMessage(remote,"You must REGISTER before using this server.")
 	end
-  end	
 	-- Yield for a little bit
 	os.sleep(0.1)
 end

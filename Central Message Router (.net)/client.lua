@@ -69,10 +69,9 @@ if bDebug then print(tArgs[1]) end
 ValidateArgs(tArgs)
 
 if string.upper(tArgs[1]) == "LIST" then 
-  tMsg["dest"] = "LCL"
   tMsg["cmd"] = "LIST"
 else
-  tMsg["dest"] = string.upper(tostring(tArgs[1]))
+  tMsg["dest"] = tostring(tArgs[1])
   tMsg["cmd"] = string.upper(tostring(tArgs[2]))
 end
 

@@ -10,8 +10,8 @@ configFile=".tRoute.cfg"
 -- send LCL [LOG/NOLOG]
 bLog = true
 
--- Codename for admin command, must be UPPERCASE
-local codeName = ".NET"
+-- Codename for admin command
+local codeName = ".NetAdmin"
 
 -------------------------------------------------------------------------
 -- ***** Init *****

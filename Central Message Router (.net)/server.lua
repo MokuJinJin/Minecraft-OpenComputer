@@ -8,10 +8,10 @@ ciPort=1001 -- Port used globally on my network
 configFile=".tRoute.cfg"
 -- Activate Debug Logging, can be modified by command while executing : 
 -- send LCL [LOG/NOLOG]
-local bLog = true
+bLog = true
 
--- Codename for admin command
-local codeName = ".NeT"
+-- Codename for admin command, must be UPPERCASE
+local codeName = ".NET"
 
 -------------------------------------------------------------------------
 -- ***** Init *****
@@ -20,7 +20,7 @@ local codeName = ".NeT"
 local oComponent = require("component")
 local oEvent = require("event")
 local oModem = oComponent.modem
---local oTunnel = oComponent.tunnel
+if oComponent.isAvailable("tunnel") then local oTunnel = oComponent.tunnel end
 local oTerm = require("term")
 local oSerialization = require("serialization")
 
@@ -32,13 +32,16 @@ if not oModem.isOpen(ciPort) then
   os.exit()
 end
 
+-- turn to false to stop the server.
+-- Must be global if we want to change it with ServerCommand
 bContinue = true
+
 local lsDest = ""
 local lsMsg = ""
 
 -- Define routing table
 tRoute = {}
-readConfig()
+
 
 -------------------------------------------------------------------------
 -- ***** Functions *****
@@ -57,36 +60,38 @@ function writeConfig(tRoute)
   file:close()
 end
 
-function FindDest(psDest, ptRoute)
-local lsAddress = ""
-local lsVia = ""
-local lsDesc = ""
-
-  -- Check the routing table and find the details of the destination
-  for i, row in ipairs(ptRoute) do
-    if row.dest == psDest then
-      lsAddress = row.address
-      lsVia = row.via
-      lsDesc = row.desc
+function FindByAddress(sAddress)
+	local o = getDefaultInformation()
+	o.address = sAddress
+	for i, row in ipairs(tRoute) do 
+		if row.address == sAddress then
+		  o = {
+			address = row.address,
+			via=row.via,
+			desc=row.desc,
+			dest=row.dest,
+			found=true
+		  }
+		end	
     end
-  end
-
-  -- Check for dest unknown
-  if lsAddress == "" then
-    lsDesc = "Unknown Address"
-  end
-
-  -- Return values to calling function
-  return lsAddress, lsVia, lsDesc
+	return o;
 end
 
-function FindDestByAddress(sAddress, ptRoute)
-  for i, row in ipairs(ptRoute) do 
-    if row.address == sAddress then
-      return FindDest(row.dest,ptRoute)
+function FindByDest(psDest)
+	local o = getDefaultInformation()
+	o.dest = psDest
+	for i, row in ipairs(tRoute) do 
+		if row.dest == psDest then
+		  o = {
+			address = row.address,
+			via=row.via,
+			desc=row.desc,
+			dest=row.dest,
+			found=true
+		  }
+		end	
     end
-  end
-  return "UKW"
+	return o;
 end
 
 function ParseMsg(psMsgRaw)
@@ -105,7 +110,7 @@ end
 function executeServerCommand(commandName)
 	local fs = require("filesystem")
 	local filename = ".net/ServerCommand-"..string.lower(commandName)..".lua"
-	local cmd = loadfile(filename)
+	local f = loadfile(filename)
 	if f~= nil then
 		return f()
 	elseif f == nil then
@@ -118,69 +123,77 @@ function executeServerCommand(commandName)
 		return err;
 	end
 end
+
+function getDefaultInformation()
+	local o = {address = "",via="",desc="",dest="",found=false}
+	return o
+end
+
+function resetInformations()
+	-- Define remote informations
+	remote = getDefaultInformation()
+	-- Define destination informations
+	destination = getDefaultInformation()
+end
+
+function sendMessage(toWho,msg)
+	if bLog then print("Sending command " .. msg .. " via " .. toWho.via .. " to " .. toWho.desc .. ":" .. toWho.dest) end
+	-- Check path
+	if toWho.via == "MODEM" then   -- Route via modem
+		oModem.send(toWho.address, ciPort, msg)
+	elseif oTunnel ~= nil then -- Route via linked card
+		oTunnel.send(msg)
+	else
+		print("Unavailable sending method : "..toWho.via)
+	end 
+end
 -------------------------------------------------------------------------
 -- ***** Main Program *****
 
 -- Clear the screen
 oTerm.clear()
 print("Initialising message routing...")
+-- Loading list of client
+readConfig()
 
 -- Enter Loop
-while fContinue do
+while bContinue do
   -- Wait for an inbound message
-print("Waiting for the next message ...\r")
-
+  print("Waiting for the next message ...\r")
+  -- reset informations
+  resetInformations()
+  
   _, _, remoteAddress, _, _, sMsgRaw = oEvent.pull("modem_message")
-if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remoteAddress) end
+  
+  remote = FindByAddress(remoteAddress)
+  
+  if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remote.address) end
   -- Parse message
   lsDest, lsCmd = ParseMsg(sMsgRaw)
 
-  -- Check for server command
-  if lsDest == codeName then
-    -- Check to log
-    if bLog then print("CMD " .. sMsgRaw) end
-    -- Check for program quit
+  -- Check for server command and remote is register (TODO : allowed)
+  if lsDest == codeName and remote.found then
+	if bLog then print("ServerCommand <" .. lsCmd .. "> from "..remote.desc) end
+    -- Execute ServerCommand
     executeServerCommand(lsCmd)
-	--if lsCmd == "EXIT" then bContinue = false end
-    --if lsCmd == "LOG" then 
-    --  bLog = true 
-    --  print("CMD Enable Logging")
-    --end
-    --if lsCmd == "NOLOG" then 
-    --  bLog = false
-    --  print("CMD Disable Logging") 
-    --end
-    if lsCmd == "LIST" then
-      lsCmd = oSerialization.serialize(tRoute)
-      --lsDest = "CMD"
-      lsDest = FindDestByAddress(remoteAddress,tRoute)
-    end
-  end
-  
-  -- Message to process/send
-  if lsDest ~= codeName or (lsDest == codeName and lsCmd == "LIST") then
-    -- Get the destination etc
-    lsAddress, lsVia, lsDesc = FindDest(lsDest, tRoute)
-
-    -- Check to log
-    if bLog then print("Sending command " .. lsCmd .. " via " .. lsVia .. " to " .. lsDest .. ":" .. lsDesc) end
-
-    -- Check for unknown destination
-    if lsDesc == "Unknown Address" then
-      -- Print the details
-      print("Unknown Address")      
-      -- Send a message to the control computer
-      
-    else
-      -- Check path
-      if lsVia == "MODEM" then       -- Route via modem
-        oModem.send(lsAddress, ciPort, lsCmd)
-      else                          -- Route via linked card
-        oTunnel.send(lsCmd)
-      end
-    end
-  end                             -- If local/forward
-
-  -- Yield for a little bit
-  os.sleep(0.1)
+  else -- Not a server Command
+	-- Special Command LIST : reply to remoteAddress
+	if lsCmd == "LIST" or lsDest == "LIST" then
+		if bLog then print("Command LIST from : ".. remote.desc) end
+		sendMessage(remote,oSerialization.serialize(tRoute))
+	else
+		-- Get the destination etc
+		destination = FindByDest(lsDest)
+		if not destination.found then
+			if bLog then print("Unknown destination : ".. destination.dest) end
+			if bLog then print("Sending message to remote : ".. remote.desc) end
+			sendMessage(remote,"Destination <".. destination.dest .."> not found")
+		else
+			if bLog then print("Sending message to destination : ".. destination.desc) end
+			sendMessage(destination,lsCmd)
+		end
+	end
+  end	
+	-- Yield for a little bit
+	os.sleep(0.1)
 end

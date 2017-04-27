@@ -82,7 +82,7 @@ elseif string.upper(tArgs[1]) == "REGISTER" then
   tMsg["cmd"] = "REGISTER"
   local cmp = require("component")
   local lsDesc = "";
-  for i=3,tablelength(tArgs),1 do lsDesc = tArgs[i] .. " " .. lsDesc end
+  for i=3,tablelength(tArgs),1 do lsDesc = lsDesc .. " " .. tArgs[i] end
   tMsg["computer"] = {
 	address = cmp.modem.address,
 	dest = string.upper(tArgs[2]),

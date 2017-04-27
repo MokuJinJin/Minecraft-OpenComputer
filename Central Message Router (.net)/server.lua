@@ -2,16 +2,17 @@
 -- Receives messages from around the network and routes to destination
 -------------------------------------------------------------------------
 
--- Constants
-ciPort=1001 -- Port used globally on my network
+-- Port used globally on the network
+ciPort=1001 
+
 -- Name of the File containing all dest
 configFile=".tRoute.cfg"
--- Activate Debug Logging, can be modified by command while executing : 
--- send LCL [LOG/NOLOG]
+
+-- Activate Debug Logging, can be modified by ServerAdminCommand while executing 
 bLog = true
 
--- Codename for admin command
-local codeName = ".NetAdmin"
+-- Code for admin command, use it instead of destination to use ServerAdminCommand
+local adminPassword = ".NetAdmin"
 
 -------------------------------------------------------------------------
 -- ***** Init *****
@@ -23,6 +24,7 @@ local oModem = oComponent.modem
 if oComponent.isAvailable("tunnel") then local oTunnel = oComponent.tunnel end
 local oTerm = require("term")
 local oSerialization = require("serialization")
+local oZColors = require("zcolors")
 
 oModem.open(ciPort)
 -- Do not have to open linked card - always open
@@ -33,24 +35,33 @@ if not oModem.isOpen(ciPort) then
 end
 
 -- turn to false to stop the server.
--- Must be global if we want to change it with ServerCommand
+-- Must be global if we want to change it with ServerAdminCommand, like exit
 bContinue = true
-
-local lsDest = ""
-local lsMsg = ""
 
 -- Define routing table
 tRoute = {}
 
-
 -------------------------------------------------------------------------
 -- ***** Functions *****
+
+function serverLog(msg,zcolor)
+	if bLog then 
+		local oComponent = require("component")
+		local oGPU = oComponent.gpu
+		local oZColors = require("zcolors")
+		if zcolor == nil then zcolor = oZColors.white end
+		oGPU.setForeground(tonumber(zcolor))	
+		print(msg) 
+		oGPU.setForeground(tonumber(oZColors.white))
+	end
+end
 
 function readConfig()
   local file = io.open(configFile)
   local fullText = file:read("*all")
   local sz = require("serialization")
   tRoute = sz.unserialize(fullText)
+  serverLog("Config loaded",oZColors.green)
 end
 
 function writeConfig(tRoute)
@@ -58,27 +69,16 @@ function writeConfig(tRoute)
   local sz = require("serialization")
   file:write(sz.serialize(tRoute))
   file:close()
+  serverLog("Config updated",oZColors.green)
 end
 
 function FindByAddress(sAddress)
 	local found = false
-	local o = getDefaultInformation()
-	o.address = sAddress
-	o = tRoute[sAddress]
+	local o = tRoute[sAddress]
 	if o == nil then
-		--for i, row in ipairs(tRoute) do 
-		--	if row.address == sAddress then
-		--	  o = {
-		--		address = row.address,
-		--		via=row.via,
-		--		desc=row.desc,
-		--		dest=row.dest,
-		--		sacAllowed = row.sacAllowed
-		--	  }
-		--	  found = true
-		--	end	
-		--end
 		found = false
+		o = getDefaultInformation()
+		o.address = sAddress -- to be sure to always have address
 	else
 		found = true
 	end
@@ -106,22 +106,16 @@ function FindByDest(psDest)
 end
 
 function ParseMsg(psMsgRaw)
-local loS = require("serialization")
-  -- Parse the raw message into a destination and a command
-  local ltMsg = loS.unserialize(tostring(psMsgRaw))
-  --local lsDest = ltMsg.dest
-  --local lsCmd = ltMsg.cmd
-	if ltMsg.dest == nil then 
-		if bLog then print("No destination => server command") end
+	local loS = require("serialization")
+	local ltMsg = loS.unserialize(tostring(psMsgRaw))
+  	if ltMsg.dest == nil then 
+		serverLog("No destination => server command",oZColors.gray)
 		ltMsg.dest = "ServerCommand"
 	else 
-		if bLog then print("Destination : <"..ltMsg.dest..">") end
+		serverLog("Destination : <"..ltMsg.dest..">",oZColors.gray)
 	end
-	if bLog then print("Command :<"..ltMsg.cmd..">") end
-  end
-  -- Return values to calling function
-  --return lsDest, lsCmd
-  return ltMsg
+	serverLog("Command :<"..ltMsg.cmd..">",oZColors.gray)
+    return ltMsg
 end
 
 function executeCommand(commandName,commandType)
@@ -162,16 +156,23 @@ function resetInformations()
 end
 
 function sendMessage(toWho,msg)
-	if bLog then print("Sending command <" .. msg .. "> via <" .. toWho.via .. "> to <" .. toWho.desc .. ">:<" .. toWho.dest..">") end
+	serverLog("Sending Command",oZColors.lightblue)
+	serverLog("Method :\t"..toWho.via,oZColors.silver)
+	serverLog("To      :\t"..toWho.desc,oZColors.silver)
+	serverLog("NickName:\t"..toWho.dest,oZColors.silver)
+	serverLog("Full command",oZColors.lightblue)
+	serverLog(msg,oZColors.yellow)
+	--serverLog("Sending command <" .. msg .. "> via <" .. toWho.via .. "> to <" .. toWho.desc .. ">:<" .. toWho.dest..">",oZColors.white)
 	-- Check path
 	if toWho.via == "MODEM" then   -- Route via modem
 		oModem.send(toWho.address, ciPort, msg)
 	elseif oTunnel ~= nil then -- Route via linked card
 		oTunnel.send(msg)
 	else
-		print("Unavailable sending method : "..toWho.via)
+		serverLog("Unavailable sending method : "..toWho.via,oZColors.red)
 	end 
 end
+
 -------------------------------------------------------------------------
 -- ***** Main Program *****
 
@@ -192,47 +193,45 @@ while bContinue do
   
   remoteFound,remote = FindByAddress(remoteAddress)
   
-  if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remote.address) end
+  serverLog("msg received:" ..  sMsgRaw .. " from " .. remote.address,oZColors.lightblue)
   -- Parse message
-  --lsDest, lsCmd = ParseMsg(sMsgRaw)
   oCmd = ParseMsg(sMsgRaw)
   
   if oCmd.cmd == "REGISTER" and not remoteFound then
 	-- Server Command : Register, List, etc...
-	if bLog then print("ServerCommand <" .. oCmd.cmd .. "> from "..remote.address) end
+	serverLog("ServerCommand <" .. oCmd.cmd .. "> from "..remote.address,oZColors.gray)
 	-- Execute ServerCommand
 	local msg = executeServerCommand(oCmd.cmd)
-	remote = FindByAddress(remote.address)
+	_,remote = FindByAddress(remote.address)
 	sendMessage(remote,msg)
   end
   
   if remoteFound then
 	  -- Check for server command and remote is allowed
-	  if oCmd.dest == codeName and remote.sacAllowed then
-		if bLog then print("ServerAdminCommand <" .. oCmd.cmd .. "> from "..remote.desc) end
+	  if oCmd.dest == adminPassword and remote.sacAllowed then
+		serverLog("ServerAdminCommand <" .. oCmd.cmd .. "> from "..remote.desc,oZColors.gray)
 		-- Execute ServerAdminCommand
 		local msg = executeServerAdminCommand(oCmd.cmd)
 		sendMessage(remote,msg)
 	  elseif oCmd.dest == "ServerCommand" then
 		-- Server Command : Register, List, etc...
-		if bLog then print("ServerCommand <" .. oCmd.cmd .. "> from "..remote.desc) end
+		serverLog("ServerCommand <" .. oCmd.cmd .. "> from "..remote.desc,oZColors.gray)
 		-- Execute ServerCommand
 		local msg = executeServerCommand(oCmd.cmd)
 		sendMessage(remote,msg)
 	  else -- Not a server Command
 		-- Get the destination etc
-		destination = FindByDest(oCmd.dest)
-		if not destination.found then
-			if bLog then print("Unknown destination : ".. destination.dest) end
-			if bLog then print("Sending message to remote : ".. remote.desc) end
-			sendMessage(remote,"Destination <".. destination.dest .."> not found")
+		destinationFound,destination = FindByDest(oCmd.dest)
+		if not destinationFound then
+			serverLog("Unknown destination : ".. oCmd.dest.."\rSending message to remote : ".. remote.desc,oZColors.red)
+			sendMessage(remote,"Destination <".. oCmd.dest .."> not found")
 		else
-			if bLog then print("Sending message to destination : ".. destination.desc) end
+			serverLog("Sending message to destination : ".. destination.desc,oZColors.green)
 			sendMessage(destination,oCmd.cmd)
 		end
 	  end
 	else
-		if bLog then print("Remote not found: " .. remote.address) end
+		serverLog("Remote not found: " .. remote.address,oZColors.red)
 		remote.via = "MODEM"
 		sendMessage(remote,"You must REGISTER before using this server.")
 	end

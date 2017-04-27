@@ -61,23 +61,33 @@ function writeConfig(tRoute)
 end
 
 function FindByAddress(sAddress)
+	local found = false
 	local o = getDefaultInformation()
 	o.address = sAddress
-	for i, row in ipairs(tRoute) do 
-		if row.address == sAddress then
-		  o = {
-			address = row.address,
-			via=row.via,
-			desc=row.desc,
-			dest=row.dest,
-			found=true
-		  }
-		end	
-    end
-	return o;
+	o = tRoute[sAddress]
+	if o == nil then
+		--for i, row in ipairs(tRoute) do 
+		--	if row.address == sAddress then
+		--	  o = {
+		--		address = row.address,
+		--		via=row.via,
+		--		desc=row.desc,
+		--		dest=row.dest,
+		--		sacAllowed = row.sacAllowed
+		--	  }
+		--	  found = true
+		--	end	
+		--end
+		found = false
+	else
+		found = true
+	end
+	
+	return found,o;
 end
 
 function FindByDest(psDest)
+	local found = false
 	local o = getDefaultInformation()
 	o.dest = psDest
 	for i, row in ipairs(tRoute) do 
@@ -87,34 +97,41 @@ function FindByDest(psDest)
 			via=row.via,
 			desc=row.desc,
 			dest=row.dest,
-			found=true
+			sacAllowed = row.sacAllowed
 		  }
+		  found = true
 		end	
     end
-	return o;
+	return found,o;
 end
 
 function ParseMsg(psMsgRaw)
 local loS = require("serialization")
-
   -- Parse the raw message into a destination and a command
-
   local ltMsg = loS.unserialize(tostring(psMsgRaw))
-  local lsDest = ltMsg.dest
-  local lsCmd = ltMsg.cmd
-
+  --local lsDest = ltMsg.dest
+  --local lsCmd = ltMsg.cmd
+	if ltMsg.dest == nil then 
+		if bLog then print("No destination => server command") end
+		ltMsg.dest = "ServerCommand"
+	else 
+		if bLog then print("Destination : <"..ltMsg.dest..">") end
+	end
+	if bLog then print("Command :<"..ltMsg.cmd..">") end
+  end
   -- Return values to calling function
-  return lsDest, lsCmd
+  --return lsDest, lsCmd
+  return ltMsg
 end
 
-function executeServerCommand(commandName)
+function executeCommand(commandName,commandType)
 	local fs = require("filesystem")
-	local filename = ".net/ServerCommand-"..string.lower(commandName)..".lua"
+	local filename = commandType.."/"..string.lower(commandName)..".lua"
 	local f = loadfile(filename)
 	if f~= nil then
 		return f()
 	elseif f == nil then
-		local err = "Failed to load server command : "..filename
+		local err = "Failed to load command : "..filename
 		print(err)
 		return err;
 	else
@@ -124,8 +141,16 @@ function executeServerCommand(commandName)
 	end
 end
 
+function executeServerAdminCommand(commandName)
+	return executeCommand(commandName,"sac")
+end
+
+function executeServerCommand(commandName)
+	return executeCommand(commandName,"sc")
+end
+
 function getDefaultInformation()
-	local o = {address = "",via="",desc="",dest="",found=false}
+	local o = {address = "",via="",desc="",dest="",sacAllowed=false}
 	return o
 end
 
@@ -137,7 +162,7 @@ function resetInformations()
 end
 
 function sendMessage(toWho,msg)
-	if bLog then print("Sending command " .. msg .. " via " .. toWho.via .. " to " .. toWho.desc .. ":" .. toWho.dest) end
+	if bLog then print("Sending command <" .. msg .. "> via <" .. toWho.via .. "> to <" .. toWho.desc .. ">:<" .. toWho.dest..">") end
 	-- Check path
 	if toWho.via == "MODEM" then   -- Route via modem
 		oModem.send(toWho.address, ciPort, msg)
@@ -159,39 +184,51 @@ readConfig()
 -- Enter Loop
 while bContinue do
   -- Wait for an inbound message
-  print("Waiting for the next message ...\r")
+  print("Waiting for the next message ...")
   -- reset informations
   resetInformations()
   
   _, _, remoteAddress, _, _, sMsgRaw = oEvent.pull("modem_message")
   
-  remote = FindByAddress(remoteAddress)
+  remoteFound,remote = FindByAddress(remoteAddress)
   
   if bLog then print("msg received:" ..  sMsgRaw .. " from " .. remote.address) end
   -- Parse message
-  lsDest, lsCmd = ParseMsg(sMsgRaw)
-  if remote.found then
-	  -- Check for server command and remote is register (TODO : allowed)
-	  if lsDest == codeName and remote.found then
-		if bLog then print("ServerCommand <" .. lsCmd .. "> from "..remote.desc) end
+  --lsDest, lsCmd = ParseMsg(sMsgRaw)
+  oCmd = ParseMsg(sMsgRaw)
+  
+  if oCmd.cmd == "REGISTER" and not remoteFound then
+	-- Server Command : Register, List, etc...
+	if bLog then print("ServerCommand <" .. oCmd.cmd .. "> from "..remote.address) end
+	-- Execute ServerCommand
+	local msg = executeServerCommand(oCmd.cmd)
+	remote = FindByAddress(remote.address)
+	sendMessage(remote,msg)
+  end
+  
+  if remoteFound then
+	  -- Check for server command and remote is allowed
+	  if oCmd.dest == codeName and remote.sacAllowed then
+		if bLog then print("ServerAdminCommand <" .. oCmd.cmd .. "> from "..remote.desc) end
+		-- Execute ServerAdminCommand
+		local msg = executeServerAdminCommand(oCmd.cmd)
+		sendMessage(remote,msg)
+	  elseif oCmd.dest == "ServerCommand" then
+		-- Server Command : Register, List, etc...
+		if bLog then print("ServerCommand <" .. oCmd.cmd .. "> from "..remote.desc) end
 		-- Execute ServerCommand
-		executeServerCommand(lsCmd)
+		local msg = executeServerCommand(oCmd.cmd)
+		sendMessage(remote,msg)
 	  else -- Not a server Command
-		-- Special Command LIST : reply to remoteAddress
-		if lsCmd == "LIST" or lsDest == "LIST" then
-			if bLog then print("Command LIST from : ".. remote.desc) end
-			sendMessage(remote,oSerialization.serialize(tRoute))
+		-- Get the destination etc
+		destination = FindByDest(oCmd.dest)
+		if not destination.found then
+			if bLog then print("Unknown destination : ".. destination.dest) end
+			if bLog then print("Sending message to remote : ".. remote.desc) end
+			sendMessage(remote,"Destination <".. destination.dest .."> not found")
 		else
-			-- Get the destination etc
-			destination = FindByDest(lsDest)
-			if not destination.found then
-				if bLog then print("Unknown destination : ".. destination.dest) end
-				if bLog then print("Sending message to remote : ".. remote.desc) end
-				sendMessage(remote,"Destination <".. destination.dest .."> not found")
-			else
-				if bLog then print("Sending message to destination : ".. destination.desc) end
-				sendMessage(destination,lsCmd)
-			end
+			if bLog then print("Sending message to destination : ".. destination.desc) end
+			sendMessage(destination,oCmd.cmd)
 		end
 	  end
 	else

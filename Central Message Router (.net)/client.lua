@@ -56,6 +56,12 @@ function ValidateArgs(ptArgs)
   -- Return result to calling function
   return fExit
 end
+
+function tablelength(T)
+  local count = 0
+  for _ in pairs(T) do count = count + 1 end
+  return count
+end
 -----------------------------------------------------------------------
 -- Main Program
 
@@ -72,6 +78,16 @@ ValidateArgs(tArgs)
 
 if string.upper(tArgs[1]) == "LIST" then 
   tMsg["cmd"] = "LIST"
+elseif string.upper(tArgs[1]) == "REGISTER" then
+  tMsg["cmd"] = "REGISTER"
+  local cmp = require("component")
+  local lsDesc = "";
+  for i=3,tablelength(tArgs),1 do lsDesc = tArgs[i] .. " " .. lsDesc end
+  tMsg["computer"] = {
+	address = cmp.modem.address,
+	dest = string.upper(tArgs[2]),
+	desc = lsDesc
+  }
 else
   tMsg["dest"] = tostring(tArgs[1])
   tMsg["cmd"] = string.upper(tostring(tArgs[2]))

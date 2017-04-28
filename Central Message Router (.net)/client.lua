@@ -81,12 +81,13 @@ if string.upper(tArgs[1]) == "LIST" then
 elseif string.upper(tArgs[1]) == "REGISTER" then
   tMsg["cmd"] = "REGISTER"
   local cmp = require("component")
+  local txt = require("text")
   local lsDesc = "";
   for i=3,tablelength(tArgs),1 do lsDesc = lsDesc .. " " .. tArgs[i] end
   tMsg["computer"] = {
 	address = cmp.modem.address,
 	dest = string.upper(tArgs[2]),
-	desc = lsDesc
+	desc = txt.trim(lsDesc)
   }
 else
   tMsg["dest"] = tostring(tArgs[1])
